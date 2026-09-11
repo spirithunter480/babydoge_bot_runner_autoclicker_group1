@@ -427,7 +427,7 @@ async def shiba_worker(acc, initial_offset):
                             # گارد زمانی ۱۷۵ ثانیه‌ای مناسب برای تخلیه کامل مخزن با بسته‌های کوچک
                             while energy > stop_threshold and (time.time() - tap_start_time < 175.0):
                                 max_taps_possible = max(1, energy // 5)
-                                taps_to_send = min(random.randint(8, 12), max_taps_possible)
+                                taps_to_send = min(random.randint(10, 15), max_taps_possible)
 
                                 res = await send_tap(session, init_data, taps=taps_to_send, token=current_token)
                                 
