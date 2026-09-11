@@ -1,0 +1,46 @@
+# =============================================================================
+# [تنظیم ۱]: نام نمایشی ورک‌فلو
+# =============================================================================
+name: BabyDOGE Auto-Tap - Group 1
+
+on:
+  # قابلیت اجرای دستی از تب Actions گیت‌هاب و تحریک از طریق API (کران‌جاب خارجی)
+  workflow_dispatch:
+
+# =============================================================================
+# [تنظیم ۲]: قفل هم‌زمانی (Concurrency)
+# تضمین می‌کند در آنِ واحد فقط یک رانر روی این ۵ اکانت فعال باشد
+# =============================================================================
+concurrency:
+  group: babydoge-autoclicker-group-1
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    # سقف زمان اجرا: ۶ ساعت (کد پایتون در ۵ ساعت و ۵۵ دقیقه خروج تمیز انجام می‌دهد)
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run bot runner
+        env:
+          PYTHONUNBUFFERED: "1"
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+          NOTIFIER_BOT_TOKEN1: ${{ secrets.NOTIFIER_BOT_TOKEN1 }}
+          NOTIFIER_CHAT_ID: ${{ secrets.NOTIFIER_CHAT_ID }}
+        run: python bot_runner_autoclicker_group1.py
