@@ -1,7 +1,7 @@
 # ==============================================================================
-# SHIBA INU AUTO-TAP — نسخه نهایی، توزیع‌شده و ضداسپم با مدیریت فریز و اسپین دو مرحله‌ای
+# BABY DOGE AUTO-TAP — نسخه اختصاصی BabyDOGERushbot با استریک و اسپین دومرحله‌ای
 # ==============================================================================
-# ربات هدف: @SHIBAInuTapbot
+# ربات هدف: @BabyDOGERushbot
 # اتصال از طریق ورکر کلودفلر (Reverse Proxy)
 # ==============================================================================
 
@@ -25,17 +25,17 @@ load_dotenv(dotenv_path=env_path)
 
 API_ID = int(os.getenv("TG_API_ID") or 0)
 API_HASH = os.getenv("TG_API_HASH", "")
-BOT_USERNAME = "SHIBAInuTapbot"
+BOT_USERNAME = "BabyDOGERushbot"
 
 # ==============================================================================
-# [GLOBAL TAP LOCK] قفل سراسری برای تضمین تپ زدن تک‌نوبتی و عدم همپوشانی اکانت‌ها
+# [GLOBAL TAP LOCK] قفل سراسری برای تضمین تپ زدن تک‌نوبتی
 # ==============================================================================
 TAP_LOCK = asyncio.Lock()
 
 # ==============================================================================
-# [TELEGRAM NOTIFIER] دریافت توکن و چت‌آیدی از متغیرهای محیطی گیت‌هاب سکرت
+# [TELEGRAM NOTIFIER] دریافت توکن و چت‌آیدی از متغیرهای محیطی
 # ==============================================================================
-TELEGRAM_NOTIFIER_BOT_TOKEN = os.getenv("NOTIFIER_BOT_TOKEN1", "").strip()
+TELEGRAM_NOTIFIER_BOT_TOKEN = os.getenv("NOTIFIER_BOT_TOKEN", os.getenv("NOTIFIER_BOT_TOKEN1", "")).strip()
 TELEGRAM_NOTIFIER_CHAT_ID = os.getenv("NOTIFIER_CHAT_ID", "").strip()
 
 async def send_telegram_alert(session, message: str):
@@ -54,14 +54,14 @@ async def send_telegram_alert(session, message: str):
         pass
 
 # ==============================================================================
-# آدرس‌های سرویس از طریق ورکر کلودفلر
+# آدرس‌های ورکر کلودفلر (Reverse Proxy)
 # ==============================================================================
-BASE_URL = "https://shibabotrunnerautoclickgroup1.alibotrunner3.workers.dev"
+BASE_URL = "https://babydogebotrunnerautoclickgroup1.alibotrunner5.workers.dev"
 
 INIT_URL = f"{BASE_URL}/v1/game/init"
 TAP_URL = f"{BASE_URL}/v1/game/tap"
-STREAK_URL = f"{BASE_URL}/v1/game/streak"
 AD_GRANT_URL = f"{BASE_URL}/v1/game/ad/grant"
+STREAK_URL = f"{BASE_URL}/v1/game/streak"
 SPIN_URL = f"{BASE_URL}/v1/game/spin"
 
 TASKS_URL = f"{BASE_URL}/v1/game/tasks"
@@ -121,7 +121,6 @@ async def fetch_init_data(session_str):
     try:
         bot_peer = await client.get_input_entity(BOT_USERNAME)
 
-        # تنظیم پلتفرم روی اندروید برای همخوانی کامل با مشخصات دستگاه و یوزرایجنت
         web_view = await client(RequestWebViewRequest(
             peer=bot_peer,
             bot=bot_peer,
@@ -183,22 +182,43 @@ async def send_tap(session, init_data, taps, token):
         print(f"[Tap Network Exception]: {e}")
         return None
 
-async def claim_streak(session, init_data):
-    payload = {
+# ==============================================================================
+# دریافت استریک روزانه دو مرحله‌ای با تایید گرنت
+# ==============================================================================
+async def claim_streak(session, init_data, acc_name=""):
+    ad_payload = {
         "bot": BOT_USERNAME,
-        "initData": init_data
+        "initData": init_data,
+        "kind": "streak"
     }
     try:
-        async with session.post(STREAK_URL, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-            text = await resp.text()
-            if resp.status == 200:
-                return json.loads(text)
+        async with session.post(AD_GRANT_URL, json=ad_payload, timeout=aiohttp.ClientTimeout(total=15)) as g_resp:
+            if g_resp.status != 200:
+                return None
+            g_data = await g_resp.json()
+            if not g_data.get("ok"):
+                return None
+            grant_id = g_data.get("grantId")
+            if not grant_id:
+                return None
+
+        await asyncio.sleep(random.uniform(2.0, 3.5))
+
+        streak_payload = {
+            "bot": BOT_USERNAME,
+            "grant_id": grant_id,
+            "initData": init_data
+        }
+        async with session.post(STREAK_URL, json=streak_payload, timeout=aiohttp.ClientTimeout(total=15)) as s_resp:
+            if s_resp.status == 200:
+                return await s_resp.json()
             return None
-    except Exception:
+    except Exception as e:
+        print(f"[{acc_name}] Streak execution error: {e}")
         return None
 
 # ==============================================================================
-# اسپین دومرحله‌ای: ۱. تایید مجوز تبلیغاتی ۲. چرخش گردونه
+# اسپین دومرحله‌ای
 # ==============================================================================
 async def claim_spin(session, init_data, acc_name=""):
     ad_payload = {
@@ -217,7 +237,6 @@ async def claim_spin(session, init_data, acc_name=""):
             if not grant_id:
                 return None
 
-        # شبیه‌سازی فاصله منطقی پس از تماشای تبلیغ
         await asyncio.sleep(random.uniform(2.5, 4.0))
 
         spin_payload = {
@@ -234,7 +253,7 @@ async def claim_spin(session, init_data, acc_name=""):
         return None
 
 # ==============================================================================
-# مدیریت خودکار بخش تسک‌ها
+# ماژول تسک‌ها (آماده برای فعال‌سازی خودکار تسک‌های جدید سرور)
 # ==============================================================================
 async def process_tasks(session, init_data, acc_name, current_balance):
     payload = {
@@ -250,7 +269,6 @@ async def process_tasks(session, init_data, acc_name, current_balance):
                 return current_balance
             tasks = data.get("tasks", [])
     except Exception as e:
-        print(f"[{acc_name}] Error fetching tasks: {e}")
         return current_balance
 
     for task in tasks:
@@ -261,7 +279,6 @@ async def process_tasks(session, init_data, acc_name, current_balance):
         claimable_at = task.get("claimableAt")
         reward = task.get("reward", 0)
 
-        # دریافت پاداش تسک‌هایی که تایمر آنها تمام شده یا آماده ثبت هستند
         is_ready = (state == "claimable") or (claimable_at and now_ms >= claimable_at and state != "done")
         if is_ready:
             claim_payload = {
@@ -276,13 +293,12 @@ async def process_tasks(session, init_data, acc_name, current_balance):
                         if c_data.get("ok"):
                             earned = c_data.get("reward", reward)
                             current_balance += earned
-                            print(f"[{acc_name}] Task Claimed: '{title}' (+{earned} SHIB) | Balance: {current_balance}")
-                            await send_telegram_alert(session, f"🎯 <b>{acc_name}</b>\nTask Claimed: <b>{title}</b> (+{earned} SHIB)\nBalance: {current_balance}")
+                            print(f"[{acc_name}] Task Claimed: '{title}' (+{earned:,} BabyDOGE) | Balance: {current_balance:,}")
+                            await send_telegram_alert(session, f"🎯 <b>{acc_name}</b>\nTask Claimed: <b>{title}</b> (+{earned:,} BabyDOGE)\nBalance: {current_balance:,}")
             except Exception:
                 pass
             await asyncio.sleep(random.uniform(1.8, 2.8))
 
-        # استارت تسک‌های جدید
         elif state == "available":
             start_payload = {
                 "bot": BOT_USERNAME,
@@ -303,21 +319,22 @@ async def process_tasks(session, init_data, acc_name, current_balance):
     return current_balance
 
 # ==============================================================================
-# دریافت آمار رتبه و امتیاز
+# آمار لیدربرد (پشتیبانی از تپ و هندلینگ پیش‌فرض)
 # ==============================================================================
 async def fetch_contest_stats(session, init_data, acc_name=""):
     payload = {
         "bot": BOT_USERNAME,
         "initData": init_data
     }
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             async with session.post(CONTEST_URL, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     contests = data.get("contests", [])
                     for item in contests:
-                        if item.get("metric") == "engagement":
+                        # در صورت اضافه شدن لیدربرد تپ یا مشارکت
+                        if item.get("metric") in ["engagement", "taps"]:
                             you_data = item.get("you")
                             if you_data and isinstance(you_data, dict):
                                 rank = you_data.get("rank")
@@ -330,7 +347,6 @@ async def fetch_contest_stats(session, init_data, acc_name=""):
                                     return entry.get("rank", "-"), entry.get("value", "-")
 
                             return "Unranked", 0
-
                 elif resp.status == 401:
                     break
         except Exception:
@@ -340,9 +356,9 @@ async def fetch_contest_stats(session, init_data, acc_name=""):
     return "N/A", "N/A"
 
 # ==============================================================================
-# ورکر هر اکانت
+# ورکر اصلی هر اکانت
 # ==============================================================================
-async def shiba_worker(acc, initial_offset):
+async def babydoge_worker(acc, initial_offset):
     acc_name = acc.get("name", "Account")
     acc_headers = get_account_headers(acc)
 
@@ -372,41 +388,46 @@ async def shiba_worker(acc, initial_offset):
                     energy = player.get("energy", 0)
                     balance = player.get("balance", 0)
                     current_token = init_res.get("tapToken", "")
+
+                    # خواندن کول‌داون داینامیک اسپین از کانفیگ سرور (پیش‌فرض ۲۴ ساعت در صورت عدم ارسال)
+                    config = init_res.get("config") or {}
+                    spin_cooldown_hours = config.get("spinCooldownHours", 24)
+                    spin_cooldown_ms = int(spin_cooldown_hours * 3600 * 1000)
                     
                     last_streak = player.get("lastStreakClaim", 0)
                     last_spin = player.get("lastSpin", 0)
 
-                    print(f"[{acc_name}] Turn Active | Balance: {balance} | Energy: {energy}/1000")
+                    print(f"[{acc_name}] Turn Active | Balance: {balance:,} BabyDOGE | Energy: {energy}/1000")
 
                     while True:
                         now_ms = time.time() * 1000
 
-                        # ۱. بررسی استریک روزانه (۲۴ ساعت)
+                        # ۱. بررسی استریک روزانه (۲۴ ساعت) با گرنت دو مرحله‌ای
                         if now_ms - last_streak >= 86400000:
-                            streak_res = await claim_streak(session, init_data)
+                            streak_res = await claim_streak(session, init_data, acc_name=acc_name)
                             if streak_res and streak_res.get("ok"):
                                 r_reward = streak_res.get("reward", 0)
                                 balance = streak_res.get("player", {}).get("balance", balance + r_reward)
                                 last_streak = streak_res.get("player", {}).get("lastStreakClaim", now_ms)
-                                print(f"[{acc_name}] Daily Streak Claimed! (+{r_reward} SHIB)")
-                                await send_telegram_alert(session, f"🎁 <b>{acc_name}</b>\nDaily Streak Claimed! (+{r_reward} SHIB)\nBalance: {balance}")
+                                print(f"[{acc_name}] Daily Streak Claimed! (+{r_reward:,} BabyDOGE)")
+                                await send_telegram_alert(session, f"🎁 <b>{acc_name}</b>\nDaily Streak Claimed! (+{r_reward:,} BabyDOGE)\nBalance: {balance:,}")
                             await asyncio.sleep(1.5)
 
-                        # ۲. بررسی اسپین دو مرحله‌ای (۸ ساعت)
-                        if now_ms - last_spin >= 28800000:
+                        # ۲. بررسی اسپین ۲۴ ساعته بر اساس کانفیگ ربات
+                        if now_ms - last_spin >= spin_cooldown_ms:
                             spin_res = await claim_spin(session, init_data, acc_name=acc_name)
                             if spin_res and spin_res.get("ok"):
                                 s_reward = spin_res.get("reward", 0)
                                 balance = spin_res.get("player", {}).get("balance", balance + s_reward)
                                 last_spin = spin_res.get("player", {}).get("lastSpin", now_ms)
-                                print(f"[{acc_name}] Lucky Spin Won! (+{s_reward} SHIB) | Balance: {balance}")
-                                await send_telegram_alert(session, f"🎡 <b>{acc_name}</b>\nLucky Spin Won! (+{s_reward} SHIB)\nBalance: {balance}")
+                                print(f"[{acc_name}] Lucky Spin Won! (+{s_reward:,} BabyDOGE) | Balance: {balance:,}")
+                                await send_telegram_alert(session, f"🎡 <b>{acc_name}</b>\nLucky Spin Won! (+{s_reward:,} BabyDOGE)\nBalance: {balance:,}")
                             await asyncio.sleep(1.5)
 
-                        # ۳. پردازش اولیه تسک‌ها قبل از شروع تپ
+                        # ۳. پردازش تسک‌ها
                         balance = await process_tasks(session, init_data, acc_name, balance)
 
-                        # اطمینان از شارژ بودن مخزن تا حداقل ۹۸۰ انرژی قبل از نوبت‌گیری
+                        # اطمینان از شارژ بودن مخزن تا حداقل ۹۸۰ انرژی قبل از گرفتن قفل
                         if energy < 980:
                             wait_fill = (1000 - energy) + random.uniform(2.0, 8.0)
                             print(f"[{acc_name}] Energy is {energy}/1000. Waiting {int(wait_fill)}s to reach >= 980...")
@@ -424,7 +445,6 @@ async def shiba_worker(acc, initial_offset):
                         async with TAP_LOCK:
                             print(f"[{acc_name}] Acquired TAP_LOCK. Tapping down to <= {stop_threshold} energy...")
                             
-                            # گارد زمانی ۱۷۵ ثانیه‌ای مناسب برای تخلیه کامل مخزن با بسته‌های کوچک
                             while energy > stop_threshold and (time.time() - tap_start_time < 175.0):
                                 max_taps_possible = max(1, energy // 5)
                                 taps_to_send = min(random.randint(10, 15), max_taps_possible)
@@ -432,7 +452,6 @@ async def shiba_worker(acc, initial_offset):
                                 res = await send_tap(session, init_data, taps=taps_to_send, token=current_token)
                                 
                                 if res and res.get("ok") and "player" in res:
-                                    # بررسی سقف درآمد روزانه (محدودیت gained: 0)
                                     if res.get("gained") == 0:
                                         print(f"[{acc_name}] Daily cap reached (gained: 0). Account is frozen.")
                                         stop_reason = "capped"
@@ -443,7 +462,6 @@ async def shiba_worker(acc, initial_offset):
                                     new_energy = new_player.get("energy")
                                     new_balance = new_player.get("balance")
 
-                                    # تشخیص فریز سرور یا عدم تغییر بالانس و انرژی
                                     if new_balance == balance and new_energy >= energy:
                                         stuck_counter += 1
                                         if stuck_counter >= 3:
@@ -455,9 +473,8 @@ async def shiba_worker(acc, initial_offset):
 
                                     energy = new_energy
                                     balance = new_balance
-                                    print(f"[{acc_name}] +{taps_to_send} Taps | Energy: {energy} | Balance: {balance}")
+                                    print(f"[{acc_name}] +{taps_to_send} Taps | Energy: {energy} | Balance: {balance:,}")
 
-                                    # توقف در صورت اتمام توان اجرای یک تپ کامل (کمتر از ۵ واحد)
                                     if energy < 5:
                                         stop_reason = "normal"
                                         break
@@ -479,35 +496,30 @@ async def shiba_worker(acc, initial_offset):
 
                                 await asyncio.sleep(random.uniform(6.5, 8.5))
 
-                        # در صورت بروز خطای اعتبار سنجی، حلقه را برای لاگین دوباره بشکن
                         if stop_reason in ["401", "error"]:
                             break
 
-                        # بررسی مجدد تسک‌ها پس از پایان تپ زدن
+                        # بررسی مجدد تسک‌ها پس از پایان تپ
                         balance = await process_tasks(session, init_data, acc_name, balance)
 
                         # ======================================================
-                        # محاسبه دقیق زمان خواب بر اساس دلیل توقف (رفع باگ اسپم)
+                        # زمان خواب هوشمند
                         # ======================================================
                         if stop_reason in ["capped", "frozen"]:
-                            # اکانت محدود شده است؛ خواب کامل یک چرخه بدون توجه به پر بودن انرژی مخزن
                             sleep_time = random.uniform(980.0, 1020.0)
                             status_note = "🧊 Account Capped/Frozen. Long sleep engaged."
                         elif stop_reason == "throttled":
-                            # خطای ریت‌لیمیت سرور؛ خواب موقت برای رفع محدودیت
                             sleep_time = random.uniform(90.0, 130.0)
                             status_note = "⚠️ 429 Throttled. Short pause to cool down."
                         else:
-                            # تخلیه نرمال مخزن؛ محاسبه خواب متناسب با نیاز شارژ تا سقف ۱۰۰۰
                             energy_needed = max(0, 1000 - energy)
                             sleep_time = energy_needed + random.uniform(3.0, 10.0)
                             status_note = "✅ Normal cycle completed."
 
                         print(f"[{acc_name}] {status_note} Sleeping for {int(sleep_time)}s...")
 
-                        # دریافت رتبه و آمار لیدربرد
                         rank, earnings = await fetch_contest_stats(session, init_data, acc_name=acc_name)
-                        if earnings == "N/A" and "tapsTotal" in player:
+                        if (earnings == "N/A" or earnings == 0) and "tapsTotal" in player:
                             earnings = player.get("tapsTotal", "N/A")
 
                         earnings_str = f"{earnings:,}" if isinstance(earnings, int) else str(earnings)
@@ -517,8 +529,9 @@ async def shiba_worker(acc, initial_offset):
 
                         notify_msg = (
                             f"💤 <b>{acc_name}</b> Finished Tapping\n"
+                            f"🐶 Coin: <b>BabyDOGE</b>\n"
                             f"💰 Balance: <b>{balance_str}</b>\n"
-                            f"💎 Earnings: <b>{earnings_str}</b>\n"
+                            f"💎 Total Taps: <b>{earnings_str}</b>\n"
                             f"🏆 Rank: <b>{rank_str}</b>\n"
                             f"🔋 Energy: {energy}/1000\n"
                             f"⏳ Sleeping for: <b>{sleep_minutes} minutes</b>\n"
@@ -527,10 +540,9 @@ async def shiba_worker(acc, initial_offset):
                         )
                         await send_telegram_alert(session, notify_msg)
 
-                        # رفتن به خواب محاسبه‌شده
                         await asyncio.sleep(sleep_time)
 
-                        # بیدار شدن و همگام‌سازی توکن با ۱ پینگ
+                        # پینگ بیداری
                         wake_res = await send_tap(session, init_data, taps=1, token=current_token)
                         if wake_res and wake_res.get("ok") and "player" in wake_res:
                             current_token = wake_res.get("tapToken", current_token)
@@ -564,18 +576,17 @@ async def main():
     start_time = time.time()
     num_accounts = len(ACCOUNTS)
     print("==================================================")
-    print(f">>> SHIBA Inu Auto-Tap Started ({num_accounts} Accounts)")
-    print(">>> Fixed Frozen Logic | Two-Stage Spin | Dynamic Sleep")
+    print(f">>> BabyDOGE Auto-Tap Started ({num_accounts} Accounts)")
+    print(">>> 2-Stage Streak & Spin Active | Cooldown: 24h")
     print(f">>> Scheduled Auto-Stop: 5 Hours and 55 Minutes")
     print("==================================================")
 
-    # تقسیم زمان پر شدن مخزن (۱۰۰۰ ثانیه) بر تعداد اکانت‌ها برای جلوگیری از تداخل
     slot_interval = 1000.0 / max(1, num_accounts)
     
     tasks = []
     for i, acc in enumerate(ACCOUNTS):
         offset = (i * slot_interval) + random.uniform(2.0, 6.0) if i > 0 else 0.0
-        tasks.append(asyncio.create_task(shiba_worker(acc, initial_offset=offset)))
+        tasks.append(asyncio.create_task(babydoge_worker(acc, initial_offset=offset)))
 
     try:
         while time.time() - start_time < MAX_RUN_SECONDS:
