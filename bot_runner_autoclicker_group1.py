@@ -1,9 +1,8 @@
 # ==============================================================================
 # BABY DOGE AUTO-TAP — نسخه اختصاصی BabyDOGERushbot (گروه ۱)
-# اتصال مستقیم به سرور رسمی بدون ورکر کلودفلر (Direct Request)
-# همراه با تسک‌های هوشمند تلگرام (عضویت خودکار و لفت آنی در هر شرایط)
-# ==============================================================================
-# ربات هدف: @BabyDOGERushbot
+# پشتیبانی از پروکسی مجزا برای هر اکانت (Webshare Proxy Support)
+# سیستم هوشمند جوین و لفت قطعی کانال‌ها + بلک‌لیست تسک‌های باگ‌دار
+# گزارش‌دهی خودکار به ربات تلگرام
 # ==============================================================================
 
 import os
@@ -15,6 +14,7 @@ import urllib.parse
 import re
 import sys
 import aiohttp
+from aiohttp_socks import ProxyConnector
 from telethon import TelegramClient
 from telethon.sessions import StringSession
 from telethon.tl.functions.messages import RequestWebViewRequest, ImportChatInviteRequest, DeleteChatUserRequest
@@ -36,13 +36,28 @@ BOT_USERNAME = "BabyDOGERushbot"
 TAP_LOCK = asyncio.Lock()
 
 # ==============================================================================
-# [TELEGRAM NOTIFIER] موقتاً غیرفعال
+# [TELEGRAM NOTIFIER] دریافت توکن و چت‌آیدی از سکرت‌ها
 # ==============================================================================
+TELEGRAM_NOTIFIER_BOT_TOKEN = os.getenv("NOTIFIER_BOT_TOKEN", os.getenv("NOTIFIER_BOT_TOKEN1", "")).strip()
+TELEGRAM_NOTIFIER_CHAT_ID = os.getenv("NOTIFIER_CHAT_ID", "").strip()
+
 async def send_telegram_alert(session, message: str):
-    return
+    if not TELEGRAM_NOTIFIER_BOT_TOKEN or not TELEGRAM_NOTIFIER_CHAT_ID:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_NOTIFIER_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_NOTIFIER_CHAT_ID,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    try:
+        async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            pass
+    except Exception:
+        pass
 
 # ==============================================================================
-# آدرس‌های سرور رسمی بازی (بدون واسطه کلودفلر)
+# آدرس‌های سرور رسمی بازی
 # ==============================================================================
 BASE_URL = os.getenv("BASE_URL", "https://fa-api.bleon.net")
 
@@ -102,8 +117,24 @@ def get_account_headers(acc):
 
     return headers
 
-async def fetch_init_data(session_str):
-    client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+def parse_telethon_proxy(proxy_url):
+    if not proxy_url:
+        return None
+    try:
+        p = urllib.parse.urlparse(proxy_url)
+        return {
+            'proxy_type': p.scheme.lower(),
+            'addr': p.hostname,
+            'port': p.port,
+            'username': p.username,
+            'password': p.password
+        }
+    except Exception:
+        return None
+
+async def fetch_init_data(session_str, proxy_str=None):
+    tg_proxy = parse_telethon_proxy(proxy_str)
+    client = TelegramClient(StringSession(session_str), API_ID, API_HASH, proxy=tg_proxy)
     await client.connect()
     try:
         bot_peer = await client.get_input_entity(BOT_USERNAME)
@@ -170,12 +201,11 @@ async def send_tap(session, init_data, taps, token):
         return None
 
 # ==============================================================================
-# ماژول عضویت و لفت آنی در کانال‌های تلگرام (Telethon)
+# ماژول عضویت و لفت قطعی کانال‌های تلگرام
 # ==============================================================================
 async def join_telegram_target(client, link: str):
     clean_link = link.split("?")[0].strip()
     
-    # لینک‌های خصوصی (Invite Link)
     invite_match = re.search(r"t\.me/(?:\+|joinchat/)([a-zA-Z0-9_-]+)", clean_link)
     if invite_match:
         invite_hash = invite_match.group(1)
@@ -189,7 +219,6 @@ async def join_telegram_target(client, link: str):
             print(f"Invite join error: {e}")
             return None
 
-    # لینک‌های عمومی (Username)
     user_match = re.search(r"t\.me/([a-zA-Z0-9_]+)", clean_link)
     if user_match:
         username = user_match.group(1)
@@ -218,9 +247,6 @@ async def leave_telegram_target(client, entity):
         except Exception as e:
             print(f"Could not leave target: {e}")
 
-# ==============================================================================
-# ارسال فرم سابمیت تسک (Multipart/Form-Data مطابق لاگ مرورگر)
-# ==============================================================================
 async def send_task_submit(session, init_data, task_id):
     form = aiohttp.FormData()
     form.add_field("task_id", str(task_id))
@@ -242,9 +268,9 @@ async def send_task_submit(session, init_data, task_id):
         return None
 
 # ==============================================================================
-# پردازش جامع تسک‌ها
+# پردازش جامع تسک‌ها با کش شکست برای جلوگیری از چرخه بیهوده
 # ==============================================================================
-async def process_tasks(session, init_data, acc_name, current_balance, session_str):
+async def process_tasks(session, init_data, acc_name, current_balance, session_str, proxy_str, failed_join_tasks):
     payload = {
         "bot": BOT_USERNAME,
         "initData": init_data
@@ -270,11 +296,10 @@ async def process_tasks(session, init_data, acc_name, current_balance, session_s
         claimable_at = task.get("claimableAt")
         reward = task.get("reward", 0)
 
-        # الف) تسک‌های عضویت کانال تلگرام
-        if task_type == "join" and state == "available":
+        # الف) تسک‌های عضویت کانال تلگرام (تنها در صورتی که قبلاً ریجکت نشده باشد)
+        if task_type == "join" and state == "available" and task_id not in failed_join_tasks:
             print(f"[{acc_name}] Handling Join Task: '{title}'...")
             
-            # ۱. استارت تسک در سرور
             start_payload = {"bot": BOT_USERNAME, "initData": init_data, "task_id": task_id}
             join_link = link
             try:
@@ -285,37 +310,39 @@ async def process_tasks(session, init_data, acc_name, current_balance, session_s
             except Exception:
                 pass
 
-            # ۲. اتصال Telethon، جوین شدن، کلیم و لفت قطعی
-            tg_client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
+            tg_proxy = parse_telethon_proxy(proxy_str)
+            tg_client = TelegramClient(StringSession(session_str), API_ID, API_HASH, proxy=tg_proxy)
             channel_entity = None
             try:
                 await tg_client.connect()
                 channel_entity = await join_telegram_target(tg_client, join_link)
                 
-                # مکث ۴ ثانیه‌ای برای ثبت وضعیت در سرور تلگرام
-                await asyncio.sleep(random.uniform(3.5, 4.5))
+                # مکث ۵ ثانیه‌ای برای ثبت وضعیت در تلگرام
+                await asyncio.sleep(random.uniform(4.5, 5.5))
 
-                # ۳. ارسال سابمیت تسک
                 c_data = await send_task_submit(session, init_data, task_id)
                 if c_data and c_data.get("ok"):
                     earned = c_data.get("reward", reward)
                     current_balance += earned
                     print(f"[{acc_name}] 🎯 Join Task Claimed: '{title}' (+{earned:,} BabyDOGE) | Balance: {current_balance:,}")
+                    await send_telegram_alert(session, f"🎯 <b>{acc_name}</b>\nJoin Task Claimed: <b>{title}</b> (+{earned:,} BabyDOGE)\nBalance: {current_balance:,}")
                 else:
                     msg = c_data.get("message") if c_data else "Unknown error"
                     print(f"[{acc_name}] ⚠️ Join Task rejected for '{title}': {msg}")
+                    # افزودن به بلک‌لیست موقت نشست جهت جلوگیری از جوین و لفت مکرر
+                    failed_join_tasks.add(task_id)
 
             except Exception as e:
                 print(f"[{acc_name}] Join task error on '{title}': {e}")
+                failed_join_tasks.add(task_id)
             finally:
-                # تضمین ۱۰۰ درصدی لفت دادن تحت هر شرایطی
                 if channel_entity:
                     await leave_telegram_target(tg_client, channel_entity)
                 await tg_client.disconnect()
 
             await asyncio.sleep(random.uniform(2.5, 4.0))
 
-        # ب) تسک‌های بازدیدی (YouTube، Twitter، Visit)
+        # ب) تسک‌های بازدیدی
         elif task_type == "visit":
             is_ready = (state == "claimable") or (claimable_at and now_ms >= claimable_at and state != "done")
             if is_ready:
@@ -324,6 +351,7 @@ async def process_tasks(session, init_data, acc_name, current_balance, session_s
                     earned = c_data.get("reward", reward)
                     current_balance += earned
                     print(f"[{acc_name}] 🎯 Visit Task Claimed: '{title}' (+{earned:,} BabyDOGE) | Balance: {current_balance:,}")
+                    await send_telegram_alert(session, f"🎯 <b>{acc_name}</b>\nTask Claimed: <b>{title}</b> (+{earned:,} BabyDOGE)\nBalance: {current_balance:,}")
                 await asyncio.sleep(random.uniform(1.8, 2.8))
 
             elif state == "available":
@@ -426,20 +454,22 @@ async def babydoge_worker(acc, initial_offset):
     acc_name = acc.get("name", "Account")
     acc_headers = get_account_headers(acc)
     session_str = acc.get("session")
+    proxy_str = acc.get("proxy") or os.getenv("LOCAL_PROXY")
+    failed_join_tasks = set()
 
     try:
         if initial_offset > 0:
             print(f"[{acc_name}] Dedicated slot offset: waiting {int(initial_offset)}s...")
             await asyncio.sleep(initial_offset)
 
-        proxy_url = os.getenv("LOCAL_PROXY")
-        connector = aiohttp.TCPConnector(ssl=False) if proxy_url else None
+        # ساخت کانکتور پروکسی مجزا برای هر اکانت
+        connector = ProxyConnector.from_url(proxy_str, ssl=False) if proxy_str else None
 
         async with aiohttp.ClientSession(headers=acc_headers, connector=connector) as session:
             while True:
                 try:
                     print(f"[{acc_name}] Fetching fresh initData...")
-                    init_data = await fetch_init_data(session_str)
+                    init_data = await fetch_init_data(session_str, proxy_str=proxy_str)
                     if not init_data:
                         await asyncio.sleep(20)
                         continue
@@ -474,6 +504,7 @@ async def babydoge_worker(acc, initial_offset):
                                 balance = streak_res.get("player", {}).get("balance", balance + r_reward)
                                 last_streak = streak_res.get("player", {}).get("lastStreakClaim", now_ms)
                                 print(f"[{acc_name}] Daily Streak Claimed! (+{r_reward:,} BabyDOGE)")
+                                await send_telegram_alert(session, f"🎁 <b>{acc_name}</b>\nDaily Streak Claimed! (+{r_reward:,} BabyDOGE)\nBalance: {balance:,}")
                             await asyncio.sleep(1.5)
 
                         # ۲. بررسی اسپین روزانه
@@ -484,10 +515,11 @@ async def babydoge_worker(acc, initial_offset):
                                 balance = spin_res.get("player", {}).get("balance", balance + s_reward)
                                 last_spin = spin_res.get("player", {}).get("lastSpin", now_ms)
                                 print(f"[{acc_name}] Lucky Spin Won! (+{s_reward:,} BabyDOGE) | Balance: {balance:,}")
+                                await send_telegram_alert(session, f"🎡 <b>{acc_name}</b>\nLucky Spin Won! (+{s_reward:,} BabyDOGE)\nBalance: {balance:,}")
                             await asyncio.sleep(1.5)
 
-                        # ۳. پردازش تسک‌ها (عضویت و لفت آنی)
-                        balance = await process_tasks(session, init_data, acc_name, balance, session_str)
+                        # ۳. پردازش تسک‌ها (جوین، کلیم و لفت آنی)
+                        balance = await process_tasks(session, init_data, acc_name, balance, session_str, proxy_str, failed_join_tasks)
 
                         # اطمینان از شارژ بودن مخزن قبل از شروع تپ
                         if energy < 980:
@@ -562,8 +594,8 @@ async def babydoge_worker(acc, initial_offset):
                         if stop_reason in ["401", "error"]:
                             break
 
-                        # بررسی مجدد تسک‌ها
-                        balance = await process_tasks(session, init_data, acc_name, balance, session_str)
+                        # بررسی مجدد تسک‌ها پس از اتمام تپ
+                        balance = await process_tasks(session, init_data, acc_name, balance, session_str, proxy_str, failed_join_tasks)
 
                         # محاسبه خواب
                         if stop_reason in ["capped", "frozen"]:
@@ -578,6 +610,30 @@ async def babydoge_worker(acc, initial_offset):
                             status_note = "✅ Normal cycle completed."
 
                         print(f"[{acc_name}] {status_note} Sleeping for {int(sleep_time)}s...")
+
+                        # ارسال گزارش پایان چرخه به ربات تلگرام
+                        rank, earnings = await fetch_contest_stats(session, init_data, acc_name=acc_name)
+                        if (earnings == "N/A" or earnings == 0) and "tapsTotal" in player:
+                            earnings = player.get("tapsTotal", "N/A")
+
+                        earnings_str = f"{earnings:,}" if isinstance(earnings, int) else str(earnings)
+                        balance_str = f"{balance:,}" if isinstance(balance, int) else str(balance)
+                        rank_str = f"#{rank}" if rank not in ["N/A", "Unranked"] else str(rank)
+                        sleep_minutes = max(1, int(round(sleep_time / 60)))
+
+                        notify_msg = (
+                            f"💤 <b>{acc_name}</b> Finished Tapping\n"
+                            f"🐶 Coin: <b>BabyDOGE</b>\n"
+                            f"💰 Balance: <b>{balance_str}</b>\n"
+                            f"💎 Total Taps: <b>{earnings_str}</b>\n"
+                            f"🏆 Rank: <b>{rank_str}</b>\n"
+                            f"🔋 Energy: {energy}/1000\n"
+                            f"⏳ Sleeping for: <b>{sleep_minutes} minutes</b>\n"
+                            f"<i>Status: {stop_reason.upper()}</i>\n"
+                            f"✅ Safe to open on mobile now!"
+                        )
+                        await send_telegram_alert(session, notify_msg)
+
                         await asyncio.sleep(sleep_time)
 
                         # پینگ بیداری
@@ -615,7 +671,7 @@ async def main():
     num_accounts = len(ACCOUNTS)
     print("==================================================")
     print(f">>> BabyDOGE Auto-Tap Started ({num_accounts} Accounts)")
-    print(">>> Direct Mode (fa-api.bleon.net) | Smart Join/Leave Active")
+    print(">>> Direct Mode (fa-api.bleon.net) | Dedicated Proxies Active")
     print(f">>> Scheduled Auto-Stop: 5 Hours and 55 Minutes")
     print("==================================================")
 
