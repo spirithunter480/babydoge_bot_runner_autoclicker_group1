@@ -1,5 +1,6 @@
 # ==============================================================================
 # BABY DOGE AUTO-TAP — نسخه اختصاصی BabyDOGERushbot (گروه ۱)
+# اتصال مستقیم به سرور رسمی بدون ورکر کلودفلر (Direct Request)
 # همراه با تسک‌های هوشمند تلگرام (عضویت خودکار و لفت آنی در هر شرایط)
 # ==============================================================================
 # ربات هدف: @BabyDOGERushbot
@@ -41,10 +42,9 @@ async def send_telegram_alert(session, message: str):
     return
 
 # ==============================================================================
-# آدرس‌های ورکر کلودفلر یا سرور مستقیم
-# نکته مهم: در ورکر کلودفلر، آدرس مقصد حتماً باید https://fa-api.bleon.net باشد
+# آدرس‌های سرور رسمی بازی (بدون واسطه کلودفلر)
 # ==============================================================================
-BASE_URL = os.getenv("BASE_URL", "https://babydogebotrunnerautoclickgroup1.alibabydoge5.workers.dev")
+BASE_URL = os.getenv("BASE_URL", "https://fa-api.bleon.net")
 
 INIT_URL = f"{BASE_URL}/v1/game/init"
 TAP_URL = f"{BASE_URL}/v1/game/tap"
@@ -93,8 +93,7 @@ def get_account_headers(acc):
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
         "Origin": "https://t.bleon.net",
-        "Referer": "https://t.bleon.net/",
-        "X-Worker-Auth": "MySecretPass_987654"
+        "Referer": "https://t.bleon.net/"
     }
 
     if device_id:
@@ -220,7 +219,7 @@ async def leave_telegram_target(client, entity):
             print(f"Could not leave target: {e}")
 
 # ==============================================================================
-# ارسال فرم سابمیت تسک (Multipart/Form-Data مطابق لاگ مینی‌اپ)
+# ارسال فرم سابمیت تسک (Multipart/Form-Data مطابق لاگ مرورگر)
 # ==============================================================================
 async def send_task_submit(session, init_data, task_id):
     form = aiohttp.FormData()
@@ -275,7 +274,7 @@ async def process_tasks(session, init_data, acc_name, current_balance, session_s
         if task_type == "join" and state == "available":
             print(f"[{acc_name}] Handling Join Task: '{title}'...")
             
-            # ۱. استارت تسک
+            # ۱. استارت تسک در سرور
             start_payload = {"bot": BOT_USERNAME, "initData": init_data, "task_id": task_id}
             join_link = link
             try:
@@ -286,14 +285,14 @@ async def process_tasks(session, init_data, acc_name, current_balance, session_s
             except Exception:
                 pass
 
-            # ۲. اتصال Telethon، جوین شدن، ثبت امتیاز و لفت قطعی
+            # ۲. اتصال Telethon، جوین شدن، کلیم و لفت قطعی
             tg_client = TelegramClient(StringSession(session_str), API_ID, API_HASH)
             channel_entity = None
             try:
                 await tg_client.connect()
                 channel_entity = await join_telegram_target(tg_client, join_link)
                 
-                # مکث ۴ ثانیه‌ای برای ثبت وضعیت عضویت در دیتابیس تلگرام
+                # مکث ۴ ثانیه‌ای برای ثبت وضعیت در سرور تلگرام
                 await asyncio.sleep(random.uniform(3.5, 4.5))
 
                 # ۳. ارسال سابمیت تسک
@@ -309,7 +308,7 @@ async def process_tasks(session, init_data, acc_name, current_balance, session_s
             except Exception as e:
                 print(f"[{acc_name}] Join task error on '{title}': {e}")
             finally:
-                # تضمین ۱۰۰ درصدی لفت دادن از کانال تحت هر شرایطی
+                # تضمین ۱۰۰ درصدی لفت دادن تحت هر شرایطی
                 if channel_entity:
                     await leave_telegram_target(tg_client, channel_entity)
                 await tg_client.disconnect()
@@ -487,7 +486,7 @@ async def babydoge_worker(acc, initial_offset):
                                 print(f"[{acc_name}] Lucky Spin Won! (+{s_reward:,} BabyDOGE) | Balance: {balance:,}")
                             await asyncio.sleep(1.5)
 
-                        # ۳. پردازش تسک‌ها (شامل عضویت و لفت آنی)
+                        # ۳. پردازش تسک‌ها (عضویت و لفت آنی)
                         balance = await process_tasks(session, init_data, acc_name, balance, session_str)
 
                         # اطمینان از شارژ بودن مخزن قبل از شروع تپ
@@ -616,7 +615,7 @@ async def main():
     num_accounts = len(ACCOUNTS)
     print("==================================================")
     print(f">>> BabyDOGE Auto-Tap Started ({num_accounts} Accounts)")
-    print(">>> 2-Stage Streak & Spin Active | Smart Join/Leave Active")
+    print(">>> Direct Mode (fa-api.bleon.net) | Smart Join/Leave Active")
     print(f">>> Scheduled Auto-Stop: 5 Hours and 55 Minutes")
     print("==================================================")
 
